@@ -10,6 +10,8 @@ Index: accountsservice-0.6.40/data/org.freedesktop.accounts.policy.in
 -      <allow_inactive>auth_self</allow_inactive>
 -      <allow_active>yes</allow_active>
 +      <allow_any>yes</allow_any>
++      <allow_inactive>yes</allow_inactive>
++      <allow_active>yes</allow_active>
      </defaults>
    </action>
  

@@ -1,3 +1,12 @@
+accountsservice (0.6.40-3blankon2) tambora; urgency=medium
+
+  * re-patch :
+     - <allow_any>yes</allow_any>
+     - <allow_inactive>yes</allow_inactive>
+     - <allow_active>yes</allow_active>
+
+ -- Mijortsa <mijortsa@localhost>  Fri, 08 Jul 2016 08:51:38 +0700
+
 accountsservice (0.6.40-3blankon1) tambora; urgency=medium
 
   * change-own-data-inactive.patch
