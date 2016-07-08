@@ -1,9 +1,7 @@
 accountsservice (0.6.40-3blankon2) tambora; urgency=medium
 
-  * re-patch :
-     - <allow_any>yes</allow_any>
-     - <allow_inactive>yes</allow_inactive>
-     - <allow_active>yes</allow_active>
+  * remove change-own-data-inactive.patch
+  * add blankon-change-own-data-inactive.patch
 
  -- Mijortsa <mijortsa@localhost>  Fri, 08 Jul 2016 08:51:38 +0700
 
