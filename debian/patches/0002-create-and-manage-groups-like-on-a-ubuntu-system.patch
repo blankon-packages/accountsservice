@@ -4,22 +4,20 @@ Forwarded: not-needed
 Description: Create and manage groups like on an Ubuntu system.
 ---
  src/daemon.c |   25 +++++++++----------------
- src/user.c   |   22 +++++++++++-----------
+ src/user.c   |   32 +++++++++++++++++++++-----------
  src/util.c   |   42 ++++++++++++++++++++++++++++++++++++++++++
  src/util.h   |    9 +++++++++
- 4 files changed, 71 insertions(+), 27 deletions(-)
+ 4 files changed, 81 insertions(+), 27 deletions(-)
 
-Index: accountsservice-0.6.35/src/daemon.c
-===================================================================
---- accountsservice-0.6.35.orig/src/daemon.c	2013-11-13 15:16:26.656124544 +0100
-+++ accountsservice-0.6.35/src/daemon.c	2013-11-13 15:16:26.648124544 +0100
-@@ -1065,22 +1065,8 @@
+--- accountsservice.orig/src/daemon.c
++++ accountsservice/src/daemon.c
+@@ -941,22 +941,8 @@ daemon_create_user_authorized_cb (Daemon
          argv[1] = "-m";
          argv[2] = "-c";
          argv[3] = cd->real_name;
 -        if (cd->account_type == ACCOUNT_TYPE_ADMINISTRATOR) {
 -                argv[4] = "-G";
--                argv[5] = ADMIN_GROUP;
+-                argv[5] = "wheel";
 -                argv[6] = "--";
 -                argv[7] = cd->user_name;
 -                argv[8] = NULL;
@@ -38,25 +36,23 @@ Index: accountsservice-0.6.35/src/daemon.c
  
          error = NULL;
          if (!spawn_with_login_uid (context, argv, &error)) {
-@@ -1089,6 +1075,13 @@
+@@ -965,6 +951,13 @@ daemon_create_user_authorized_cb (Daemon
                  return;
          }
  
 +        if (cd->account_type == ACCOUNT_TYPE_ADMINISTRATOR) {
-+                add_user_to_group (context, cd->user_name, ADMIN_GROUP);
++                add_user_to_group (context, cd->user_name, "sudo");
 +		 add_user_to_group (context, cd->user_name, "adm");
 +		 add_user_to_group (context, cd->user_name, "lpadmin");
 +		 add_user_to_group (context, cd->user_name, "sambashare");
 +        }
 +
          user = daemon_local_find_user_by_name (daemon, cd->user_name);
-         user_update_local_account_property (user, TRUE);
-         user_update_system_account_property (user, FALSE);
-Index: accountsservice-0.6.35/src/user.c
-===================================================================
---- accountsservice-0.6.35.orig/src/user.c	2013-11-13 15:16:26.656124544 +0100
-+++ accountsservice-0.6.35/src/user.c	2013-11-13 15:16:26.648124544 +0100
-@@ -124,7 +124,8 @@
+ 
+         accounts_accounts_complete_create_user (NULL, context, user_local_get_object_path (user));
+--- accountsservice.orig/src/user.c
++++ accountsservice/src/user.c
+@@ -113,7 +113,8 @@ static gint
  account_type_from_pwent (struct passwd *pwent)
  {
          struct group *grp;
@@ -66,8 +62,15 @@ Index: accountsservice-0.6.35/src/user.c
          gid_t *groups;
          gint ngroups;
          gint i;
-@@ -139,12 +140,21 @@
-                 g_debug (ADMIN_GROUP " group not found");
+@@ -123,17 +124,26 @@ account_type_from_pwent (struct passwd *
+                 return ACCOUNT_TYPE_ADMINISTRATOR;
+         }
+ 
+-        grp = getgrnam ("wheel");
++        grp = getgrnam ("sudo");
+         if (grp == NULL) {
+-                g_debug ("wheel group not found");
++                g_debug ("sudo group not found");
                  return ACCOUNT_TYPE_STANDARD;
          }
 -        wheel = grp->gr_gid;
@@ -90,7 +93,7 @@ Index: accountsservice-0.6.35/src/user.c
                          g_free (groups);
                          return ACCOUNT_TYPE_ADMINISTRATOR;
                  }
-@@ -1693,7 +1703,7 @@
+@@ -1250,7 +1260,7 @@ user_change_account_type_authorized_cb (
          gid_t *groups;
          gint ngroups;
          GString *str;
@@ -99,9 +102,12 @@ Index: accountsservice-0.6.35/src/user.c
          struct group *grp;
          gint i;
          const gchar *argv[6];
-@@ -1705,22 +1715,22 @@
+@@ -1260,24 +1270,24 @@ user_change_account_type_authorized_cb (
+                          "change account type of user '%s' (%d) to %d",
+                          user->user_name, user->uid, account_type);
  
-                 grp = getgrnam (ADMIN_GROUP);
+-                grp = getgrnam ("wheel");
++                grp = getgrnam ("sudo");
                  if (grp == NULL) {
 -                        throw_error (context, ERROR_FAILED, "failed to set account type: wheel group not found");
 +                        throw_error (context, ERROR_FAILED, "failed to set account type: sudo group not found");
@@ -126,22 +132,20 @@ Index: accountsservice-0.6.35/src/user.c
                          break;
                  case ACCOUNT_TYPE_STANDARD:
                  default:
-Index: accountsservice-0.6.35/src/util.c
-===================================================================
---- accountsservice-0.6.35.orig/src/util.c	2013-11-13 15:16:26.656124544 +0100
-+++ accountsservice-0.6.35/src/util.c	2013-11-13 15:16:26.648124544 +0100
-@@ -313,3 +313,45 @@
+--- accountsservice.orig/src/util.c
++++ accountsservice/src/util.c
+@@ -270,3 +270,45 @@ get_caller_uid (GDBusMethodInvocation *c
  
          return TRUE;
  }
 +
 +void
-+add_user_to_group (GDBusMethodInvocation *context,
-+                   const char *user_name,
-+                   const char *group_name)
++add_user_to_group (DBusGMethodInvocation *context,
++                  const char *user_name,
++                  const char *group_name)
 +{
 +        GError *error;
-+        const gchar *argv[4];
++        gchar *argv[4];
 +
 +        argv[0] = (gchar*) "/usr/sbin/adduser";
 +        argv[1] = (gchar*) user_name;
@@ -157,12 +161,12 @@ Index: accountsservice-0.6.35/src/util.c
 +}
 +
 +void
-+remove_user_from_group (GDBusMethodInvocation *context,
++remove_user_from_group (DBusGMethodInvocation *context,
 +                        const char *user_name,
 +                        const char *group_name)
 +{
 +        GError *error;
-+        const gchar *argv[4];
++        gchar *argv[4];
 +
 +        argv[0] = (gchar*) "/usr/sbin/deluser";
 +        argv[1] = (gchar*) user_name;
@@ -176,19 +180,17 @@ Index: accountsservice-0.6.35/src/util.c
 +                return;
 +        }
 +}
-Index: accountsservice-0.6.35/src/util.h
-===================================================================
---- accountsservice-0.6.35.orig/src/util.h	2013-11-13 15:16:26.656124544 +0100
-+++ accountsservice-0.6.35/src/util.h	2013-11-13 15:16:26.648124544 +0100
-@@ -40,6 +40,15 @@
+--- accountsservice.orig/src/util.h
++++ accountsservice/src/util.h
+@@ -40,6 +40,15 @@ gint get_user_groups (const gchar  *user
                        gid_t         group,
                        gid_t       **groups);
  
-+void add_user_to_group (GDBusMethodInvocation *context,
++void add_user_to_group (DBusGMethodInvocation *context,
 +                        const char *user_name,
 +                        const char *group_name);
 +
-+void remove_user_from_group (GDBusMethodInvocation *context,
++void remove_user_from_group (DBusGMethodInvocation *context,
 +                             const char *user_name,
 +                             const char *group_name);
 +

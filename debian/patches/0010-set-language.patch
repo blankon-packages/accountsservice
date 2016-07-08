@@ -1,11 +1,41 @@
 Description: Save user language and regional formats settings to ~/.pam_environment.
-Author: Gunnar Hjalmarsson <gunnarhj@ubuntu.com>
+Author: Gunnar Hjalmarsson <ubuntu@gunnar.cc>
 
-Index: accountsservice-0.6.35/src/user.c
-===================================================================
---- accountsservice-0.6.35.orig/src/user.c	2013-11-13 15:16:53.000125338 +0100
-+++ accountsservice-0.6.35/src/user.c	2013-11-13 15:16:52.996125337 +0100
-@@ -1071,6 +1071,297 @@
+---
+ src/user.c |  486 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 476 insertions(+), 10 deletions(-)
+
+--- accountsservice.orig/src/user.c
++++ accountsservice/src/user.c
+@@ -114,6 +114,8 @@ typedef struct UserClass
+ } UserClass;
+ 
+ static void user_finalize (GObject *object);
++static gchar *user_get_fallback_value (User        *user,
++                                       const gchar *property);
+ 
+ G_DEFINE_TYPE (User, user, G_TYPE_OBJECT)
+ 
+@@ -193,10 +195,16 @@ user_get_property (GObject    *object,
+                 g_value_set_string (value, user->email);
+                 break;
+         case PROP_LANGUAGE:
+-                g_value_set_string (value, user->language);
++                if (user->language)
++                        g_value_set_string (value, user->language);
++                else
++                        g_value_set_string (value, user_get_fallback_value (user, "Language"));
+                 break;
+         case PROP_FORMATS_LOCALE:
+-                g_value_set_string (value, user->formats_locale);
++                if (user->formats_locale)
++                        g_value_set_string (value, user->formats_locale);
++                else
++                        g_value_set_string (value, user_get_fallback_value (user, "FormatsLocale"));
+                 break;
+         case PROP_X_SESSION:
+                 g_value_set_string (value, user->x_session);
+@@ -1085,6 +1093,352 @@ user_set_email (User                  *u
          return TRUE;
  }
  
@@ -26,10 +56,47 @@ Index: accountsservice-0.6.35/src/user.c
 +static void
 +user_regain_privileges ()
 +{
-+        if (setresuid (0, 0, -1) != 0)
-+                g_warning ("setresuid() failed");
-+        if (setresgid (0, 0, -1) != 0)
-+                g_warning ("setresgid() failed");
++        setresuid (0, 0, -1);
++        setresgid (0, 0, -1);
++}
++
++static void
++user_get_profile_env (User   *user,
++                      gchar **language,
++                      gchar **lang,
++                      gchar **lcmess)
++{
++        *language = NULL;
++        *lang = NULL;
++        *lcmess = NULL;
++
++        FILE  *fp;
++        gchar *profile_path = g_build_path ("/", user->home_dir, ".profile", NULL);
++
++        if ((fp = fopen (profile_path, "r"))) {
++                gchar line[50];
++                gchar **tokens;
++                while ((fgets (line, 50, fp)) != NULL) {
++                        if (g_str_has_prefix (line, "export LANGUAGE=\"")) {
++                                tokens = g_strsplit (line, "\"", 3);
++                                *language = g_strdup (tokens[1]);
++                                g_strfreev (tokens);
++                        }
++                        if (g_str_has_prefix (line, "export LANG=\"")) {
++                                tokens = g_strsplit (line, "\"", 3);
++                                *lang = g_strdup (tokens[1]);
++                                g_strfreev (tokens);
++                        }
++                        if (g_str_has_prefix (line, "export LC_MESSAGES=\"")) {
++                                tokens = g_strsplit (line, "\"", 3);
++                                *lcmess = g_strdup (tokens[1]);
++                                g_strfreev (tokens);
++                        }
++                }
++                fclose (fp);
++        }
++
++        g_free (profile_path);
 +}
 +
 +static gchar *
@@ -70,85 +137,30 @@ Index: accountsservice-0.6.35/src/user.c
 +}
 +
 +static gchar *
-+user_locale_validate (User                  *user,
-+                      const gchar           *locale,
-+                      GDBusMethodInvocation *context)
++user_locale_validate (const gchar           *locale,
++                      DBusGMethodInvocation *context)
 +{
-+        gchar    *validated_locale = NULL;
-+        gchar    *tmp_locale = NULL;
-+        gchar    *tmp_locale_utf8 = NULL;
-+        gboolean  ret = FALSE;
-+        gchar    *output = NULL;
-+        GError   *error = NULL;
-+        gboolean  found = FALSE;
++        gchar *validated_locale = NULL;
++        gchar *tmp_locale = NULL;
++        gchar *current = g_strdup (setlocale (LC_ALL, NULL));
 +
 +        if (locale == NULL || strlen (locale) < 2)
 +                goto out;
 +        tmp_locale = g_strdup (locale);
 +        g_strchomp (tmp_locale);
 +
-+        /* When a new language has been installed, we want to be able to instantly
-+           set a locale for that language to denote the regional formats. For that
-+           reason we make use of 'locale -a' instead of calling setlocale(). */
-+
-+        if (!user_drop_privileges_to_user (user))
-+                goto out;
-+        ret = g_spawn_command_line_sync ("locale -a", &output, NULL, NULL, &error);
-+        user_regain_privileges ();
-+        if (!ret) {
-+                throw_error (context, ERROR_FAILED, "Failed to run 'locale -a': %s", error->message);
-+                g_clear_error (&error);
-+                goto out;
-+        }
-+
-+        /* Replace 'UTF-8' with 'utf8' since 'locale -a' outputs the latter. */
-+        tmp_locale_utf8 = g_strdup (tmp_locale);
-+        if (g_strrstr (tmp_locale_utf8, ".UTF-8")) {
-+                gchar **tokens = g_strsplit_set (tmp_locale_utf8, ".8", 3);
-+                g_free (tmp_locale_utf8);
-+                tmp_locale_utf8 = g_strconcat (tokens[0], ".utf8", tokens[2], NULL);
-+                g_strfreev (tokens);
-+        }
-+
-+        gchar **tokens;
-+        int i;
-+        g_strchomp (output);
-+        tokens = g_strsplit (output, "\n", -1);
-+        for (i = 0; tokens[i]; i++) {
-+                if (g_strcmp0 (tokens[i], "C") == 0 ||
-+                    g_strcmp0 (tokens[i], "C.UTF-8") == 0 ||
-+                    g_strcmp0 (tokens[i], "POSIX") == 0)
-+                        continue;
-+
-+                if (g_strcmp0 (tokens[i], tmp_locale_utf8) == 0) {
-+                        found = TRUE;
-+                        break;
-+                }
-+        }
-+        g_strfreev (tokens);
-+
-+        if (!found) {
++        if (!setlocale (LC_ALL, tmp_locale)) {
 +                throw_error (context, ERROR_FAILED, "'%s' is not a valid locale name", tmp_locale);
 +                goto out;
 +        }
 +        validated_locale = user_locale_utf8_fix (tmp_locale);
 +
 +out:
++        setlocale (LC_ALL, current);
 +        g_free (tmp_locale);
-+        g_free (tmp_locale_utf8);
-+        g_free (output);
++        g_free (current);
 +
 +        return validated_locale;
-+}
-+
-+static gchar *
-+strip_quotes (const gchar *str)
-+{
-+        if ((g_str_has_prefix (str, "\"") && g_str_has_suffix (str, "\""))
-+          || (g_str_has_prefix (str, "'") && g_str_has_suffix (str, "'")))
-+                return g_strndup (str + 1, strlen (str) - 2);
-+        else
-+                return g_strdup (str);
 +}
 +
 +static gchar *
@@ -156,46 +168,79 @@ Index: accountsservice-0.6.35/src/user.c
 +                         const gchar *property)
 +{
 +        gchar *fallback_value = NULL;
-+        gchar *language = NULL;
-+        gchar *lang = NULL;
-+        gchar *lctime = NULL;
++        gchar *system_language = NULL;
++        gchar *system_lang = NULL;
++        gchar *system_lctime = NULL;
++
++        gchar *pam_env_path = g_build_path ("/", user->home_dir, ".pam_environment", NULL);
++        gchar *profile_language = NULL;
++        gchar *profile_lang = NULL;
++        gchar *profile_lcmess = NULL;
++
++        /* take ~/.profile into account if not migrated */
++        if (!g_file_test (pam_env_path, G_FILE_TEST_IS_REGULAR))
++                user_get_profile_env (user,
++                                      &profile_language,
++                                      &profile_lang,
++                                      &profile_lcmess);
 +
 +        FILE  *fp;
 +        if ((fp = fopen ("/etc/default/locale", "r"))) {
 +                gchar line[50];
++                gchar **tokens;
 +                while ((fgets (line, 50, fp)) != NULL) {
-+                        g_strchomp (line);
-+                        if (g_str_has_prefix (line, "LANGUAGE="))
-+                                language = strip_quotes (line + strlen ("LANGUAGE="));
-+                        else if (g_str_has_prefix (line, "LANG="))
-+                                lang = strip_quotes (line + strlen ("LANG="));
-+                        else if (g_str_has_prefix (line, "LC_TIME="))
-+                                lctime = strip_quotes (line + strlen ("LC_TIME="));
++                        if (g_str_has_prefix (line, "LANGUAGE=\"")) {
++                                tokens = g_strsplit (line, "\"", 3);
++                                system_language = g_strdup (tokens[1]);
++                                g_strfreev (tokens);
++                        }
++                        if (g_str_has_prefix (line, "LANG=\"")) {
++                                tokens = g_strsplit (line, "\"", 3);
++                                system_lang = g_strdup (tokens[1]);
++                                g_strfreev (tokens);
++                        }
++                        if (g_str_has_prefix (line, "LC_TIME=\"")) {
++                                tokens = g_strsplit (line, "\"", 3);
++                                system_lctime = g_strdup (tokens[1]);
++                                g_strfreev (tokens);
++                        }
 +                }
 +                fclose (fp);
 +        }
 +
 +        if (g_strcmp0 (property, "Language") == 0) {
 +                gchar *tmp = NULL;
-+                if (language)
-+                        tmp = language;
-+                else if (lang)
-+                        tmp = lang;
++                if (profile_language)
++                        tmp = profile_language;
++                else if (system_language)
++                        tmp = system_language;
++                else if (profile_lcmess)
++                        tmp = profile_lcmess;
++                else if (profile_lang)
++                        tmp = profile_lang;
++                else if (system_lang)
++                        tmp = system_lang;
 +                fallback_value = user_language_validate (user, tmp);
 +        }
-+        
++
 +        if (g_strcmp0 (property, "FormatsLocale") == 0) {
 +                gchar *tmp = NULL;
-+                if (lctime)
-+                        tmp = lctime;
-+                else if (lang)
-+                        tmp = lang;
++                if (system_lctime)
++                        tmp = system_lctime;
++                else if (profile_lang)
++                        tmp = profile_lang;
++                else if (system_lang)
++                        tmp = system_lang;
 +                fallback_value = user_locale_utf8_fix (tmp);
 +        }
 +
-+        g_free (language);
-+        g_free (lang);
-+        g_free (lctime);
++        g_free (system_language);
++        g_free (system_lang);
++        g_free (system_lctime);
++        g_free (pam_env_path);
++        g_free (profile_language);
++        g_free (profile_lang);
++        g_free (profile_lcmess);
 +
 +        return fallback_value;
 +}
@@ -204,7 +249,7 @@ Index: accountsservice-0.6.35/src/user.c
 +user_update_environment (User                  *user,
 +                         gchar                 *data,
 +                         const gchar           *script,
-+                         GDBusMethodInvocation *context)
++                         DBusGMethodInvocation *context)
 +
 +/* This function updates ~/.pam_environment by means of the help files in /usr/share/language-tools. */
 +{
@@ -214,9 +259,6 @@ Index: accountsservice-0.6.35/src/user.c
 +        const gchar  *allowed_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890._+-:/ @";
 +        gboolean      ret;
 +        GError       *error = NULL;
-+
-+        if (data == NULL)
-+               return NULL;
 +
 +        program = g_build_path ("/", "/usr/share/language-tools", script, NULL);
 +        gchar *command[] = { program, user->home_dir, data, NULL };
@@ -264,46 +306,89 @@ Index: accountsservice-0.6.35/src/user.c
 +}
 +
 +static gboolean
-+user_HOME_available (User *user)
++user_migration_from_profile (User                   *user,
++                             DBusGMethodInvocation  *context,
++                             gboolean               *is_migrate,
++                             gchar                 **profile_language,
++                             gchar                 **profile_formats)
 +{
-+        /* run these tests as user to prevent incorrect
-+           failures when HOME is on NFS */
-+        user_drop_privileges_to_user (user);
++        gchar    *pam_env_path;
++        gchar    *language = NULL;
++        gchar    *lang = NULL;
++        gchar    *lcmess = NULL;
++        gchar    *tmp;
++        gchar    *command = NULL;
++        GError   *error = NULL;
++        gboolean  ret = FALSE;
 +
-+        GDir* homedir = g_dir_open (user->home_dir, 0, NULL);
++        *is_migrate = FALSE;
++        *profile_language = NULL;
++        *profile_formats = NULL;
 +
-+        if (homedir == NULL) {  // HOME not found
-+                user_regain_privileges ();
-+                return FALSE;
-+        } else {
-+                do {
-+                        const gchar *entry = g_dir_read_name (homedir);
-+                        gchar *path_to_entry = g_build_path ("/", user->home_dir, entry, NULL);
-+                        if (g_file_test (path_to_entry, G_FILE_TEST_IS_SYMLINK)) {
-+                                g_free (path_to_entry);
-+                                continue;
-+                        }
-+                        if (g_strcmp0 (entry, NULL) == 0) {  // HOME contains only symlinks
-+                                g_free (path_to_entry);
-+                                g_dir_close (homedir);
-+                                user_regain_privileges ();
-+                                return FALSE;
-+                        } else
-+                                g_free (path_to_entry);
-+                                break;
-+                } while (TRUE);
++        pam_env_path = g_build_path ("/", user->home_dir, ".pam_environment", NULL);
++        if (g_file_test (pam_env_path, G_FILE_TEST_IS_REGULAR))
++                goto out;
++        else
++                *is_migrate = TRUE;
++
++        user_get_profile_env (user, &language, &lang, &lcmess);
++
++        tmp = NULL;
++        if (language)
++                tmp = language;
++        else if (lcmess)
++                tmp = lcmess;
++        if (tmp) {
++                *profile_language = user_update_environment (user,
++                                                             tmp,
++                                                             "set-language-helper",
++                                                             context);
++                if (*profile_language == NULL)
++                        goto out;
 +        }
 +
-+        g_dir_close (homedir);
-+        user_regain_privileges ();
++        tmp = NULL;
++        if (lang && lcmess && g_strcmp0 (lang, lcmess) != 0)
++                tmp = lang;
++        else if (lang && !lcmess)
++                tmp = lang;
++        if (tmp) {
++                *profile_formats = user_update_environment (user,
++                                                            user_locale_validate (tmp, context),
++                                                            "save-to-pam-env",
++                                                            context);
++                if (*profile_formats == NULL)
++                        goto out;
++        }
 +
-+        return TRUE;
++        const gchar *program = "/usr/share/language-tools/del-profile-env-settings";
++        command = g_strconcat (program, " '", user->home_dir, "'", NULL);
++        if (!user_drop_privileges_to_user (user))
++                goto out;
++        gboolean is_success = g_spawn_command_line_sync (command, NULL, NULL, NULL, &error);
++        user_regain_privileges ();
++        if (!is_success) {
++                throw_error (context, ERROR_FAILED, "couldn't edit ~/.profile: %s", error->message);
++                g_error_free (error);
++                goto out;
++        }
++
++        ret = TRUE;
++
++out:
++        g_free (pam_env_path);
++        g_free (language);
++        g_free (lang);
++        g_free (lcmess);
++        g_free (command);
++
++        return ret;
 +}
 +
  static void
  user_change_language_authorized_cb (Daemon                *daemon,
                                      User                  *user,
-@@ -1078,11 +1369,78 @@
+@@ -1092,12 +1446,94 @@ user_change_language_authorized_cb (Daem
                                      gpointer               data)
  
  {
@@ -312,7 +397,12 @@ Index: accountsservice-0.6.35/src/user.c
 +        gboolean     is_language_changed = (user->language && g_strcmp0 (user->language, data) != 0)
 +                         || (!user->language && g_strcmp0 (data, fallback_language) != 0);
 +
-+        if (!user_HOME_available (user)) {
++        gboolean     is_migrate;
++        gchar       *dummy;
++        gchar       *profile_formats;
++
++        gchar *profile_path = g_build_path ("/", user->home_dir, ".profile", NULL);
++        if (!g_file_test (profile_path, G_FILE_TEST_IS_REGULAR)) {
 +
 +                /* SetLanguage was probably called from a login greeter,
 +                   and HOME not mounted and/or not decrypted.
@@ -322,22 +412,32 @@ Index: accountsservice-0.6.35/src/user.c
 +                goto out2;
 +        }
 +
-+        if (is_language_changed) {
++        gboolean is_success = user_migration_from_profile (user,
++                                                           context,
++                                                           &is_migrate,
++                                                           &dummy,
++                                                           &profile_formats);
++        if (is_migrate && !is_success)
++                goto out2;
++
++        if (is_language_changed || is_migrate) {
 +                gchar *language = user_update_environment (user,
 +                                                           data,
 +                                                           "set-language-helper",
 +                                                           context);
 +                if (language != NULL) {
 +                        g_free (user->language);
-+                        user->language = language;
++                        user->language = g_strdup (language);
 +                }
-+
-+                gchar *locale = NULL;
  
 -        if (g_strcmp0 (user->language, language) != 0) {
 -                g_free (user->language);
 -                user->language = g_strdup (language);
-+                if (!user->formats_locale) {
++                gchar *locale = NULL;
++
++                if (profile_formats)
++                        locale = profile_formats;
++                else if (!user->formats_locale && is_language_changed) {
 +
 +                        /* set the user formats (certain LC_* variables) explicitly
 +                           in order to prevent surprises when LANG is changed */
@@ -345,9 +445,10 @@ Index: accountsservice-0.6.35/src/user.c
 +                        if ((fp = fopen ("/etc/default/locale", "r"))) {
 +                                gchar line[50];
 +                                while ((fgets (line, 50, fp)) != NULL) {
-+                                        if (g_str_has_prefix (line, "LC_TIME=")) {
-+                                                g_strchomp (line);
-+                                                locale = strip_quotes (line + strlen ("LC_TIME="));
++                                        if (g_str_has_prefix (line, "LC_TIME=\"")) {
++                                                gchar **tokens = g_strsplit (line, "\"", 3);
++                                                locale = g_strdup (tokens[1]);
++                                                g_strfreev (tokens);
 +                                                break;
 +                                        }
 +                                }
@@ -373,64 +474,76 @@ Index: accountsservice-0.6.35/src/user.c
 +
 +                if (locale != NULL && strlen (locale) > 0) {
 +                        gchar *formats_locale = user_update_environment (user,
-+                                                                         user_locale_validate (user, locale, context),
++                                                                         user_locale_validate (locale, context),
 +                                                                         "save-to-pam-env",
 +                                                                         context);
 +                        if (formats_locale != NULL) {
 +                                g_free (user->formats_locale);
-+                                user->formats_locale = formats_locale;
++                                user->formats_locale = g_strdup (formats_locale);
 +                        }
 +                }
-+out1:
-+                g_free (locale);
  
++out1:
                  save_extra_data (user);
  
-@@ -1091,6 +1449,7 @@
+                 g_signal_emit (user, signals[CHANGED], 0);
+@@ -1105,6 +1541,8 @@ user_change_language_authorized_cb (Daem
                  g_object_notify (G_OBJECT (user), "language");
          }
  
 +out2:
-         accounts_user_complete_set_language (ACCOUNTS_USER (user), context);
++        g_free (profile_path);
+         dbus_g_method_return (context);
  }
  
-@@ -1134,11 +1493,15 @@
+@@ -1156,11 +1594,38 @@ user_change_formats_locale_authorized_cb
                                            gpointer               data)
  
  {
 -        gchar *formats_locale = data;
--
--        if (g_strcmp0 (user->formats_locale, formats_locale) != 0) {
--                g_free (user->formats_locale);
--                user->formats_locale = g_strdup (formats_locale);
-+        if (g_strcmp0 (user->formats_locale, data) != 0) {
++        gboolean  is_migrate;
++        gchar    *profile_language;
++        gchar    *dummy;
++
++        gboolean is_success = user_migration_from_profile (user,
++                                                           context,
++                                                           &is_migrate,
++                                                           &profile_language,
++                                                           &dummy);
++        if (is_migrate && !is_success)
++                goto out;
++
++        if (g_strcmp0 (user->formats_locale, data) != 0 || is_migrate) {
 +                gchar *formats_locale = user_update_environment (user,
-+                                                                 user_locale_validate (user, data, context),
++                                                                 user_locale_validate (data, context),
 +                                                                 "save-to-pam-env",
 +                                                                 context);
 +                if (formats_locale != NULL) {
 +                        g_free (user->formats_locale);
-+                        user->formats_locale = formats_locale;
++                        user->formats_locale = g_strdup (formats_locale);
++                }
+ 
+-        if (g_strcmp0 (user->formats_locale, formats_locale) != 0) {
+-                g_free (user->formats_locale);
+-                user->formats_locale = g_strdup (formats_locale);
++                if (profile_language != NULL) {
++                        gchar *language = user_update_environment (user,
++                                                                   profile_language,
++                                                                   "set-language-helper",
++                                                                   context);
++                        if (language != NULL) {
++                                g_free (user->language);
++                                user->language = g_strdup (language);
++                        }
 +                }
  
                  save_extra_data (user);
  
-@@ -2325,10 +2688,16 @@
-                 g_value_set_string (value, user->email);
-                 break;
-         case PROP_LANGUAGE:
--                g_value_set_string (value, user->language);
-+                if (user->language)
-+                        g_value_set_string (value, user->language);
-+                else
-+                        g_value_set_string (value, user_get_fallback_value (user, "Language"));
-                 break;
-         case PROP_FORMATS_LOCALE:
--                g_value_set_string (value, user->formats_locale);
-+                if (user->formats_locale)
-+                        g_value_set_string (value, user->formats_locale);
-+                else
-+                        g_value_set_string (value, user_get_fallback_value (user, "FormatsLocale"));
-                 break;
-         case PROP_X_SESSION:
-                 g_value_set_string (value, user->x_session);
+@@ -1169,6 +1634,7 @@ user_change_formats_locale_authorized_cb
+                 g_object_notify (G_OBJECT (user), "formats_locale");
+         }
+ 
++out:
+         dbus_g_method_return (context);
+ }
+ 

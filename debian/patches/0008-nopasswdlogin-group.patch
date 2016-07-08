@@ -2,11 +2,9 @@
  src/user.c |   46 ++++++++++++++++++++++++++++++++++++++++++++++
  1 file changed, 46 insertions(+)
 
-Index: accountsservice-0.6.35/src/user.c
-===================================================================
---- accountsservice-0.6.35.orig/src/user.c	2013-11-13 15:16:46.892125154 +0100
-+++ accountsservice-0.6.35/src/user.c	2013-11-13 15:16:46.888125154 +0100
-@@ -1824,6 +1824,21 @@
+--- accountsservice.orig/src/user.c
++++ accountsservice/src/user.c
+@@ -1381,6 +1381,21 @@ user_change_password_mode_authorized_cb
                                  return;
                          }
  
@@ -28,7 +26,7 @@ Index: accountsservice-0.6.35/src/user.c
                          if (mode == PASSWORD_MODE_SET_AT_LOGIN) {
                                  argv[0] = "/usr/bin/chage";
                                  argv[1] = "-d";
-@@ -1871,6 +1886,23 @@
+@@ -1428,6 +1443,23 @@ user_change_password_mode_authorized_cb
                          g_object_notify (G_OBJECT (user), "locked");
                  }
  
@@ -52,7 +50,7 @@ Index: accountsservice-0.6.35/src/user.c
                  user->password_mode = mode;
  
                  g_object_notify (G_OBJECT (user), "password-mode");
-@@ -1938,6 +1970,20 @@
+@@ -1495,6 +1527,20 @@ user_change_password_authorized_cb (Daem
  
          error = NULL;
          if (!spawn_with_login_uid (context, argv, &error)) {

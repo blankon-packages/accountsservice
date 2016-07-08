@@ -13,8 +13,8 @@ Bug: https://bugs.freedesktop.org/show_bug.cgi?id=49993
  #define PATH_SHADOW "/etc/shadow"
  #define PATH_NOLOGIN "/sbin/nologin"
  #define PATH_FALSE "/bin/false"
--#define PATH_GDM_CUSTOM "/etc/gdm3/daemon.conf"
-+#define PATH_GDM_CUSTOM "/etc/gdm/custom.conf"
+-#define PATH_GDM_CUSTOM "/etc/gdm/custom.conf"
++#define PATH_GDM_CUSTOM "/etc/gdm3/daemon.conf"
  
  #define USERDIR LOCALSTATEDIR "/lib/AccountsService/users"
  
@@ -22,8 +22,8 @@ Bug: https://bugs.freedesktop.org/show_bug.cgi?id=49993
          daemon->priv->autologin_id = 0;
  
          if (!load_autologin (daemon, &name, &enabled, &error)) {
--                g_debug ("failed to load gdms daemon.conf: %s", error->message);
-+                g_debug ("failed to load gdms custom.conf: %s", error->message);
+-                g_debug ("failed to load gdms custom.conf: %s", error->message);
++                g_debug ("failed to load gdms daemon.conf: %s", error->message);
                  g_error_free (error);
                  g_free (name);
  

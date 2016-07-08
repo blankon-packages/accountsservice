@@ -1,9 +1,44 @@
-accountsservice (0.6.40-0blankon1) tambora; urgency=medium
+accountsservice (0.6.40-3blankon1) tambora; urgency=medium
 
-  * New upstream release
-  * Merge with Ubuntu from PPA GNOME3-Team
+  * change-own-data-inactive.patch
 
- -- Mahyuddin <yudi.al@gmail.com>  Sat, 11 Apr 2015 10:37:06 +0700
+ -- Mijortsa <mijortsa@localhost>  Fri, 08 Jul 2016 07:49:50 +0700
+
+accountsservice (0.6.40-3) unstable; urgency=medium
+
+  * Team upload.
+
+  [ Alessio Treglia ]
+  * Update b-d according to libsystemd transition.
+  * libaccountsservice-dev dependencies fix.
+
+  [ Michael Biebl ]
+  * Transition to libsystemd. (Closes: #779740)
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 27 Aug 2015 02:45:14 +0200
+
+accountsservice (0.6.40-2) unstable; urgency=medium
+
+  * Build docs unconditionally to prevent FTBFS.
+
+ -- Alessio Treglia <alessio@debian.org>  Wed, 03 Jun 2015 11:56:11 +0100
+
+accountsservice (0.6.40-1) unstable; urgency=medium
+
+  * New upstream release (Closes: #787581):
+    - Fix SIGSEGV with UID numbers larger than 2^31. (Closes: #759563)
+  * Update patchset against new sources:
+    - Refresh patches.
+    - Drop 1001-buildsystem.patch, seems unnecessary.
+  * Refresh libaccountsservice0.symbols.
+  * Revert "Use ./autogen.sh in dh_autoreconf to fix binary-arch build
+    failure".
+  * Remove debian/clean to avoid deletion of gtk-doc.make.
+  * Update debian/watch
+  * Update Homepage
+  * Bump Standards
+
+ -- Alessio Treglia <alessio@debian.org>  Wed, 03 Jun 2015 08:28:07 +0100
 
 accountsservice (0.6.37-3) unstable; urgency=medium
 
@@ -552,4 +587,3 @@ accountsservice (0.6.1-1) unstable; urgency=low
   * Initial release (Closes: #606002).
 
  -- Alessio Treglia <alessio@debian.org>  Mon, 17 Jan 2011 10:14:35 +0100
-
